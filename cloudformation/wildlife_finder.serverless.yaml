@@ -1,0 +1,113 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Outputs:
+  RequestURL:
+    Description: Prod URL for API to use as Request URL for Slack app
+    Value:
+      Fn::Sub: https://${WildlifeFinderAPI}.execute-api.${AWS::Region}.amazonaws.com/Prod/
+Parameters:
+  AccessToken:
+    Description: OAuth access token from Slack app settings
+    NoEcho: true
+    Type: String
+  VerificationToken:
+    Description: Verification token from Slack app settings
+    NoEcho: true
+    Type: String
+Resources:
+  WildlifeFinderAPI:
+    Properties:
+      DefinitionBody:
+        basePath: /Prod
+        definitions:
+          Empty:
+            title: Empty Schema
+            type: object
+        info:
+          title:
+            Ref: AWS::StackName
+          version: '2017-06-11T02:20:25Z'
+        paths:
+          /:
+            post:
+              produces:
+              - application/json
+              responses:
+                '200':
+                  description: 200 response
+                  schema:
+                    $ref: '#/definitions/Empty'
+              x-amazon-apigateway-integration:
+                contentHandling: CONVERT_TO_TEXT
+                httpMethod: POST
+                passthroughBehavior: when_no_match
+                responses:
+                  default:
+                    statusCode: '200'
+                type: aws
+                uri:
+                  Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WildlifeFinderFunction.Arn}/invocations
+        schemes:
+        - https
+        swagger: '2.0'
+      StageName: Prod
+    Type: AWS::Serverless::Api
+  WildlifeFinderFunction:
+    Properties:
+      CodeUri: 's3://iotlambdabucket/code_artifact/wildlife_finder.zip'
+      Description: Checks Slack message.channels events for images. If an image is
+        found uses Rekognition to determine if it contains an animal.
+      Environment:
+        Variables:
+          ACCESS_TOKEN:
+            Ref: AccessToken
+          VERIFICATION_TOKEN:
+            Ref: VerificationToken
+      Events:
+        WildlifeFinderAPIPost:
+          Properties:
+            Method: post
+            Path: /
+            RestApiId:
+              Ref: WildlifeFinderAPI
+          Type: Api
+      Handler: wildlife_finder.lambda_handler
+      Role:
+        Fn::GetAtt:
+        - LambdaRekognitionRole
+        - Arn
+      Runtime: python3.6
+    Type: AWS::Serverless::Function
+  LambdaRekognitionRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Action:
+          - sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Sid: AllowLambdaServiceToAssumeRole
+        Version: '2012-10-17'
+      Path: /
+      Policies:
+      - PolicyDocument:
+          Statement:
+          - Action:
+            - rekognition:DetectLabels
+            Effect: Allow
+            Resource: '*'
+          Version: '2012-10-17'
+        PolicyName: RekognitionDetectLabels
+      - PolicyDocument:
+          Statement:
+          - Action:
+            - logs:CreateLogStream
+            - logs:CreateLogGroup
+            - logs:PutLogEvents
+            Effect: Allow
+            Resource: '*'
+          Version: '2012-10-17'
+        PolicyName: WriteToCWLogs
+    Type: AWS::IAM::Role
+Transform: AWS::Serverless-2016-10-31
